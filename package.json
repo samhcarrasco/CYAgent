@@ -11,7 +11,7 @@
     "README.md"
   ],
   "bin": {
-    "cya": "./dist/cli.js"
+    "cya": "dist/cli.js"
   },
   "scripts": {
     "prepublishOnly": "npm run build",
