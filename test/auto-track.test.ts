@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { runInit } from '../src/commands/init.js';
 import { runTrack } from '../src/commands/track.js';
@@ -118,31 +117,17 @@ describe('auto-track derivation', () => {
     });
   });
 
-  it('derives deterministic synthetic IDs and human titles without Jira IDs', () => {
-    const derived = deriveAutoTrackTicket('feature/session-expiry', initialState());
-    expect(derived?.ticket).toMatch(/^BRANCH-[A-F0-9]{8}$/);
-    expect(derived?.title).toBe('session expiry');
-    expect(deriveAutoTrackTicket('feature/session-expiry', initialState())?.ticket).toBe(
-      derived?.ticket,
-    );
+  it('derives branch-name ticket IDs and human titles without Jira IDs', () => {
+    expect(deriveAutoTrackTicket('feature/session-expiry', initialState())).toEqual({
+      ticket: 'feature/session-expiry',
+      title: 'session expiry',
+    });
   });
 
   it('skips Jira tickets that already exist on another branch', () => {
     const state = initialState();
     state.tickets['AUTH-123'] = ticket('AUTH-123', 'other-branch');
     expect(deriveAutoTrackTicket('AUTH-123-session-expiry', state)).toBeUndefined();
-  });
-
-  it('extends synthetic hashes when the short derived ID collides', () => {
-    const branch = 'feature/session-expiry';
-    const hash = createHash('sha256').update(branch).digest('hex').toUpperCase();
-    const state = initialState();
-    state.tickets[`BRANCH-${hash.slice(0, 8)}`] = ticket(
-      `BRANCH-${hash.slice(0, 8)}`,
-      'other-branch',
-    );
-    const derived = deriveAutoTrackTicket(branch, state);
-    expect(derived?.ticket).toBe(`BRANCH-${hash.slice(0, 12)}`);
   });
 
   it('does not derive tickets for protected branches', () => {
@@ -225,6 +210,33 @@ describe('hook-driven auto-tracking', () => {
 
     const state = readState(sprintDir);
     expect(state.tickets['AUTH-123']).toBeUndefined();
+  });
+
+  it('auto-tracks branches without a Jira-style ticket ID using the branch name', async () => {
+    checkout(repoDir, '-b feature/session-expiry');
+    await runHookReferenceTransaction(
+      'committed',
+      'pid-1',
+      `${ZERO_SHA} ${baseSha} refs/heads/feature/session-expiry\n`,
+      repoDir,
+    );
+    await runHookPostCheckout(baseSha, baseSha, '1', 'pid-1', repoDir, { quiet: true });
+
+    let state = readState(sprintDir);
+    expect(state.tickets['feature/session-expiry']).toMatchObject({
+      title: 'session expiry',
+      branch: 'feature/session-expiry',
+      baselineSha: baseSha,
+    });
+    expect(existsSync(join(sprintDir, 'tickets', 'feature%2Fsession-expiry.md'))).toBe(true);
+
+    makeCommit(repoDir, 'branch-name ticket work');
+    await runSync(repoDir, { quiet: true });
+
+    state = readState(sprintDir);
+    expect(state.tickets['feature/session-expiry'].commits.map((c) => c.message)).toEqual([
+      'branch-name ticket work',
+    ]);
   });
 
   it('auto-tracked branch baseline excludes inherited commits but records later work', async () => {

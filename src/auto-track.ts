@@ -19,7 +19,6 @@ export interface DerivedAutoTrackTicket {
 
 const ZERO_SHA = /^0{40}$/;
 const JIRA_TICKET_RE = /([A-Z][A-Z0-9]+-\d+)/;
-const SYNTHETIC_PREFIX = 'BRANCH-';
 const MARKER_MAX_AGE_MS = 10 * 60 * 1000;
 
 export function branchMarkerDir(repoRoot: string): string {
@@ -58,17 +57,12 @@ export function deriveAutoTrackTicket(
     };
   }
 
-  const hash = createHash('sha256').update(branch).digest('hex').toUpperCase();
-  const title = titleFromBranch(branch);
-  for (let length = 8; length <= hash.length; length += 4) {
-    const ticket = `${SYNTHETIC_PREFIX}${hash.slice(0, length)}`;
-    const existing = state.tickets[ticket];
-    if (!existing || existing.branch === branch) {
-      return { ticket, title };
-    }
-  }
-
-  return undefined;
+  const existing = state.tickets[branch];
+  if (existing && existing.branch !== branch) return undefined;
+  return {
+    ticket: branch,
+    title: titleFromBranch(branch),
+  };
 }
 
 export async function recordBranchCreationMarker(

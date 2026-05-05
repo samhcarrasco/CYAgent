@@ -6,6 +6,7 @@ import { atomicWrite } from '../io.js';
 import { reduceAll } from '../reduce.js';
 import { renderTicket, renderSprint } from '../render.js';
 import { CyaError } from '../errors.js';
+import { ticketMarkdownPath } from '../ticket-paths.js';
 
 export async function runRecordCommand(
   command: string,
@@ -61,7 +62,7 @@ export async function runRecordCommand(
   if (!existsSync(ticketsDir)) mkdirSync(ticketsDir);
 
   await atomicWrite(join(sprintDir, 'state.json'), JSON.stringify(state, null, 2) + '\n');
-  await atomicWrite(join(ticketsDir, `${ticket}.md`), renderTicket(state.tickets[ticket]));
+  await atomicWrite(ticketMarkdownPath(ticketsDir, ticket), renderTicket(state.tickets[ticket]));
   await atomicWrite(join(sprintDir, 'SPRINT.md'), renderSprint(state));
 
   const icon = validStatus === 'passed' ? '✓' : '✗';

@@ -126,14 +126,15 @@ ignored.
 never auto-tracked.
 
 Manual tracking is available when the branch predates hooks, is protected, or
-the name does not match what you want:
+you want a ticket ID that differs from the branch name:
 
 ```sh
 cya track AUTH-123 "Fix session expiry"
 ```
 
 Branches with a Jira-style ID (`AUTH-123-session-expiry`) use it directly.
-Branches without one get a deterministic synthetic ID (`BRANCH-A1B2C3D4`).
+Branches without one use the branch name as the ticket ID
+(`feature/session-expiry`) so CYA never invents unreadable synthetic IDs.
 
 ## Storage
 
@@ -144,7 +145,7 @@ CYA stores an append-only event log and renders derived files from it.
 | `events.jsonl` | Source-of-truth event stream |
 | `state.json` | Current reduced sprint state |
 | `SPRINT.md` | Sprint-level markdown summary |
-| `tickets/<ticket>.md` | Ticket summary with commits, evidence, sessions, notes |
+| `tickets/<ticket>.md` | Ticket summary with commits, evidence, sessions, notes. Path separators in ticket IDs are encoded in filenames. |
 | `review-*.md` | Saved review output for a date range |
 
 Sprint data is stored in platform app-data outside the repo by default. Set

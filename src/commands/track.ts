@@ -7,6 +7,7 @@ import { atomicWrite } from '../io.js';
 import { reduceAll } from '../reduce.js';
 import { renderTicket, renderSprint } from '../render.js';
 import { getHeadSha } from '../git.js';
+import { ticketMarkdownPath } from '../ticket-paths.js';
 
 export interface TrackOptions {
   source?: 'user' | 'git-hook';
@@ -60,7 +61,7 @@ export async function runTrack(
   await atomicWrite(join(sprintDir, 'state.json'), JSON.stringify(state, null, 2) + '\n');
 
   const ticketState = state.tickets[ticket];
-  await atomicWrite(join(ticketsDir, `${ticket}.md`), renderTicket(ticketState));
+  await atomicWrite(ticketMarkdownPath(ticketsDir, ticket), renderTicket(ticketState));
   await atomicWrite(join(sprintDir, 'SPRINT.md'), renderSprint(state));
 
   if (!options.quiet) console.log(`tracking ${ticket}: ${trimmedTitle}`);

@@ -7,6 +7,7 @@ import { reduceAll } from '../reduce.js';
 import { renderTicket, renderSprint } from '../render.js';
 import { getGitLog } from '../git.js';
 import { isProtectedBranch } from '../auto-track.js';
+import { ticketMarkdownPath } from '../ticket-paths.js';
 
 export interface SyncOptions {
   source?: 'user' | 'git-hook' | 'watcher' | 'claude-code';
@@ -101,7 +102,7 @@ export async function runSync(cwd = process.cwd(), opts: SyncOptions = {}): Prom
 
   if (targetTicketId && state.tickets[targetTicketId]) {
     await atomicWrite(
-      join(ticketsDir, `${targetTicketId}.md`),
+      ticketMarkdownPath(ticketsDir, targetTicketId),
       renderTicket(state.tickets[targetTicketId]),
     );
   }

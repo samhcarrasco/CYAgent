@@ -64,6 +64,11 @@ export async function runAgentStatus(cwd = process.cwd()): Promise<void> {
     console.log(`Tracked ticket on this branch: ${matching[0].id}`);
   } else if (matching.length === 0) {
     console.log(`Tracked ticket on this branch: none`);
+    if (branch) {
+      console.log(
+        'Tracking hint: run `cya track <ticket> "<title>"` to bind this branch.',
+      );
+    }
   } else {
     console.log(`Tracked ticket on this branch: ambiguous (${matching.length} tickets)`);
   }

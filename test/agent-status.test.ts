@@ -91,6 +91,12 @@ describe('agent status', () => {
     expect(output).toContain('Tracked ticket on this branch: none');
   });
 
+  it('suggests explicit tracking when current branch is untracked', async () => {
+    await runAgentStatus(repoDir);
+    expect(output).toContain('Tracking hint: run `cya track <ticket> "<title>"`');
+    expect(output).toContain('cya track <ticket> "<title>"');
+  });
+
   it('shows unassigned count', async () => {
     makeCommit(repoDir, 'orphan work');
     await runSync(repoDir);
