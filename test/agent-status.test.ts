@@ -71,8 +71,8 @@ describe('agent status', () => {
   });
 
   it('shows last sync source after sync with --source git-hook', async () => {
-    makeCommit(repoDir, 'work');
     await runTrack('AUTH-1', 'test', repoDir);
+    makeCommit(repoDir, 'work');
     await runSync(repoDir, { source: 'git-hook' });
     output = '';
     await runAgentStatus(repoDir);

@@ -1,7 +1,9 @@
 ﻿import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { runTrack } from '../src/commands/track.js';
+import { runInit } from '../src/commands/init.js';
 import { CyaError } from '../src/errors.js';
 import { StateSchema } from '../src/state.js';
 import { SprintEventSchema } from '../src/events.js';
@@ -11,6 +13,7 @@ import {
   makeTempGitRepo,
   makeTempDir,
   cleanup,
+  resolveTestSprintDir,
 } from './helpers.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -145,6 +148,25 @@ describe('runTrack — state update', () => {
       JSON.parse(readFileSync(join(sprintDir, 'state.json'), 'utf8')),
     );
     expect(state.tickets['AUTH-123'].commits).toEqual([]);
+  });
+
+  it('records the current HEAD as a baseline when commits already exist', async () => {
+    const repoDir = makeTempGitRepo();
+    execSync('git -c user.email=t@t.t -c user.name=T commit --allow-empty -m init', {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: repoDir, stdio: 'pipe' })
+      .toString()
+      .trim();
+    await runInit({}, repoDir);
+    await runTrack('AUTH-123', 'Fix session expiry', repoDir);
+
+    const raw = JSON.parse(
+      readFileSync(join(resolveTestSprintDir(repoDir), 'events.jsonl'), 'utf8').trim(),
+    );
+    cleanup(repoDir);
+    expect(raw.payload.baselineSha).toBe(baselineSha);
   });
 });
 

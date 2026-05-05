@@ -1,4 +1,3 @@
-﻿import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireSprintDir, getBranchName } from '../paths.js';
@@ -6,42 +5,7 @@ import { createEvent, appendEvent, readEvents } from '../events.js';
 import { atomicWrite } from '../io.js';
 import { reduceAll } from '../reduce.js';
 import { renderTicket, renderSprint } from '../render.js';
-
-interface RawCommit {
-  sha: string;
-  shortSha: string;
-  message: string;
-  authorName: string | undefined;
-  authorEmail: string | undefined;
-  committedAt: string;
-}
-
-// spawnSync bypasses the shell — safe on Windows (no % expansion).
-function getGitLog(repoRoot: string): RawCommit[] {
-  // Fields separated by \x1f (unit separator), one commit per line.
-  const result = spawnSync('git', ['log', '--format=%H\x1f%h\x1f%s\x1f%an\x1f%ae\x1f%at'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
-  if (result.status !== 0 || !result.stdout) return [];
-
-  const commits: RawCommit[] = [];
-  for (const line of result.stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const [sha, shortSha, message, authorName, authorEmail, unixTs] = trimmed.split('\x1f');
-    if (!sha || !unixTs) continue;
-    commits.push({
-      sha,
-      shortSha,
-      message,
-      authorName: authorName || undefined,
-      authorEmail: authorEmail || undefined,
-      committedAt: new Date(parseInt(unixTs, 10) * 1000).toISOString(),
-    });
-  }
-  return commits;
-}
+import { getGitLog } from '../git.js';
 
 export interface SyncOptions {
   source?: 'user' | 'git-hook' | 'watcher' | 'claude-code';
@@ -62,17 +26,20 @@ export async function runSync(cwd = process.cwd(), opts: SyncOptions = {}): Prom
   const existingEvents = await readEvents(sprintDir);
   const existingState = reduceAll(existingEvents);
 
-  // Collect SHAs already recorded across all tickets.
+  // Collect SHAs already recorded across all tickets and unassigned commits.
   const knownShas = new Set<string>();
   for (const ticket of Object.values(existingState.tickets)) {
     for (const commit of ticket.commits) knownShas.add(commit.sha);
   }
+  for (const commit of existingState.unassignedCommits) knownShas.add(commit.sha);
 
   // Find the one ticket whose branch matches the current branch.
   const matching = Object.values(existingState.tickets).filter((t) => t.branch === branch);
   let targetTicketId: string | undefined;
+  let targetBaselineSha: string | undefined;
   if (matching.length === 1) {
     targetTicketId = matching[0].id;
+    targetBaselineSha = matching[0].baselineSha;
   } else if (matching.length === 0) {
     console.log(
       `sync: branch "${branch}" not associated with any tracked ticket. Commits unassigned.`,
@@ -83,7 +50,10 @@ export async function runSync(cwd = process.cwd(), opts: SyncOptions = {}): Prom
     );
   }
 
-  const gitCommits = getGitLog(repoRoot);
+  const gitCommits = getGitLog(
+    repoRoot,
+    targetBaselineSha ? `${targetBaselineSha}..HEAD` : undefined,
+  );
   // git log is newest-first; append oldest-first so events are chronological.
   const newCommits = gitCommits.filter((c) => !knownShas.has(c.sha)).reverse();
 
@@ -130,5 +100,9 @@ export async function runSync(cwd = process.cwd(), opts: SyncOptions = {}): Prom
   await atomicWrite(join(sprintDir, 'SPRINT.md'), renderSprint(state));
 
   const label = targetTicketId ? ` on ${targetTicketId}` : ' (unassigned)';
-  if (!quiet) console.log(`sync: recorded ${newCommits.length} new commit${newCommits.length === 1 ? '' : 's'}${label}.`);
+  if (!quiet) {
+    console.log(
+      `sync: recorded ${newCommits.length} new commit${newCommits.length === 1 ? '' : 's'}${label}.`,
+    );
+  }
 }

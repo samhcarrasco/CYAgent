@@ -7,6 +7,7 @@ import { runTrack } from '../src/commands/track.js';
 import { runInit } from '../src/commands/init.js';
 import { CyaError } from '../src/errors.js';
 import { StateSchema } from '../src/state.js';
+import { appendEvent, createEvent } from '../src/events.js';
 import {
   setupTestAppData,
   makeTempGitRepo,
@@ -95,7 +96,7 @@ describe('runSync — observes commits', () => {
     makeCommit(repoDir, 'add regression test');
     await runSync(repoDir);
     const events = readEvents(sprintDir);
-    expect(events.filter((e) => e.type === 'commit_observed')).toHaveLength(2); // initial + new
+    expect(events.filter((e) => e.type === 'commit_observed')).toHaveLength(1);
   });
 
   it('sync observes multiple commits', async () => {
@@ -104,7 +105,7 @@ describe('runSync — observes commits', () => {
     makeCommit(repoDir, 'third change');
     await runSync(repoDir);
     const events = readEvents(sprintDir);
-    expect(events.filter((e) => e.type === 'commit_observed')).toHaveLength(4); // initial + 3
+    expect(events.filter((e) => e.type === 'commit_observed')).toHaveLength(3);
   });
 
   it('commit_observed event has correct sha and message', async () => {
@@ -245,6 +246,61 @@ describe('runSync — track before first commit', () => {
     const md = readFileSync(join(sd, 'tickets', 'AUTH-123.md'), 'utf8');
     cleanup(repoDir);
     expect(md).toContain('fix: session expiry regression');
+  });
+});
+
+// ── baseline behavior ────────────────────────────────────────────────────────
+
+describe('runSync — baselines', () => {
+  it('manual tracking after an initial commit records only later commits', async () => {
+    const repoDir = makeTempGitRepo();
+    makeCommit(repoDir, 'initial commit');
+    await runInit({}, repoDir);
+    await runTrack('AUTH-123', 'Fix session expiry', repoDir);
+
+    makeCommit(repoDir, 'post-baseline work');
+    await runSync(repoDir);
+
+    const state = readState(resolveTestSprintDir(repoDir));
+    cleanup(repoDir);
+    expect(state.tickets['AUTH-123'].commits.map((c) => c.message)).toEqual([
+      'post-baseline work',
+    ]);
+  });
+
+  it('legacy track_started events without a baseline keep historical sync behavior', async () => {
+    const repoDir = makeTempGitRepo();
+    makeCommit(repoDir, 'initial commit');
+    await runInit({}, repoDir);
+    const sprintDir = resolveTestSprintDir(repoDir);
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: repoDir,
+      stdio: 'pipe',
+    }).toString().trim();
+
+    await appendEvent(
+      sprintDir,
+      createEvent({
+        type: 'track_started',
+        repoPath: repoDir,
+        source: 'user',
+        ticket: 'LEGACY-1',
+        branch,
+        payload: { title: 'Legacy work' },
+      }),
+    );
+
+    makeCommit(repoDir, 'new legacy work');
+    await runSync(repoDir);
+
+    const state = readState(sprintDir);
+    cleanup(repoDir);
+    expect(state.tickets['LEGACY-1'].commits.map((c) => c.message)).toContain(
+      'initial commit',
+    );
+    expect(state.tickets['LEGACY-1'].commits.map((c) => c.message)).toContain(
+      'new legacy work',
+    );
   });
 });
 

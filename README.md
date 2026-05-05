@@ -1,11 +1,14 @@
+```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  local first sprint memory for software engineers                            │
+│ local-first sprint memory for software engineers                             │
 └──────────────────────────────────────────────────────────────────────────────┘
+```
 
-An append-only work memory for git-backed development: track tickets, capture
-decisions, attach commits, summarize Claude Code sessions,
-and turn the whole thing into standup or  preformance review notes
-    This is my sprint memory. It catches the context that commits leave behind.
+CYA is an append-only work memory for git-backed development. It tracks tickets,
+captures decisions, attaches commits, summarizes Claude Code sessions, and turns
+the whole thing into standup or performance review notes.
+
+This is sprint memory for the context that commits leave behind.
 
 # Quick start
 
@@ -15,21 +18,27 @@ Install the CLI once, then initialize CYA inside the git repo you want to track:
 npm install -g cyagent
 cd path/to/work-repo
 cya init
+cya hooks install
 ```
 
-Start tracking the branch you are working on:
+Create a feature branch and start working:
 
 ```sh
 git checkout -b AUTH-123-session-expiry
-cya track AUTH-123 "Fix session expiry"
 ```
 
-Turn on the automation. This is the main benefit of this agent: git hooks and
-Claude Code hooks keep the sprint memory updated while you work, instead of
-making you manually reconstruct context later.
+With hooks installed, CYA automatically starts tracking newly created
+non-protected branches. For `AUTH-123-session-expiry`, it creates ticket
+`AUTH-123` with the title `session expiry`.
+
+CYA starts counting commits from the point the branch begins being tracked. That
+means old repo history is not pulled into the new ticket, and only commits made
+after tracking starts are attached.
+
+Optional Claude Code summaries can keep session notes and generated updates
+fresh while you work:
 
 ```sh
-cya hooks install
 cya claude install
 cya configure --enable-ai
 ```
@@ -37,46 +46,34 @@ cya configure --enable-ai
 By default, CYA keeps sprint data in app-data storage outside the repo. Use
 `cya init --storage repo` if you want a repo-local `.sprint/` directory.
 
-    Local-first by default — sprint data lives in app data unless you opt into
-    repo-local `.sprint/` storage
+## Auto-tracking branches
 
-    Append-only event log — `events.jsonl` is the source of truth; markdown and
-    JSON summaries are rendered from it
+CYA auto-tracks only branches that are newly created and checked out by the same
+git operation, such as `git checkout -b AUTH-123-session-expiry` or
+`git switch -c AUTH-123-session-expiry`.
 
-    Git-aware tracking — tickets remember branches, and commits are attached
-    automatically when the branch maps cleanly to one ticket
+Simply switching to an existing branch does not create a tracked ticket.
 
-    Evidence-driven updates — test/build/lint outcomes, blockers, decisions,
-    discoveries, and session summaries become material for standup and review
+`main` and `master` are never auto-tracked. CYA also skips `develop`, `dev`,
+`trunk`, `release/*`, and `hotfix/*` by default because those branches are
+usually shared or release-management branches.
 
-    Optional agent hooks — git and Claude Code integrations keep sync automatic
-    while staying local to your checkout
+Manual tracking is still useful when:
 
-Why this exists
-
-Most sprint memory is lost in the spaces between commits: the blocker you hit,
-the decision you made, the test that proved the fix, the branch that drifted
-from its ticket, the AI session that got useful work done but left no artifact.
-
-This repo is an exercise in practical engineering memory specifically in
-building a small local tool that makes daily updates, performance reviews, and
-handoffs easier.
-
-
-How it works
-
-Initialize CYA inside a git repository:
+- the branch existed before hooks were installed
+- you intentionally want to track work on a protected branch
+- the branch name does not contain the ticket or title you want
 
 ```sh
-cya init
-```
-
-Start a ticket from the branch you are working on:
-
-```sh
-git checkout -b AUTH-123-session-expiry
 cya track AUTH-123 "Fix session expiry"
 ```
+
+If a new branch contains a Jira-style ticket ID, CYA uses it. For example,
+`AUTH-123-session-expiry` becomes ticket `AUTH-123` and title `session expiry`.
+If there is no ticket ID, CYA creates a deterministic branch-derived ID like
+`BRANCH-A1B2C3D4` and a title from the branch name.
+
+## How it works
 
 Capture context while you work:
 
@@ -94,7 +91,7 @@ npm test
 cya record-command "npm test" --status passed --ticket AUTH-123
 ```
 
-Sync git commits into the sprint log:
+Sync git commits manually when needed:
 
 ```sh
 cya sync
@@ -115,7 +112,7 @@ Close out work:
 cya done AUTH-123 --note "Merged behind the session-refresh flag"
 ```
 
-Storage
+## Storage
 
 CYA stores an append-only event log and renders derived files from it.
 
@@ -146,6 +143,7 @@ cya init --storage repo
 In repo mode, CYA adds generated `.sprint/state.json` and `.sprint/SPRINT.md`
 files to `.gitignore`. Review `.sprint/` before committing repo-local memory.
 
+## Configuration
 
 When AI is enabled, CYA calls the local `claude` CLI to summarize structured
 sprint data for `standup` and `review`. Template output is always available:
@@ -155,7 +153,7 @@ cya standup --no-ai
 cya review --no-ai
 ```
 
-Configuration:
+Configuration commands:
 
 ```sh
 cya configure
@@ -173,17 +171,19 @@ cya configure --allow-diff-summarization
 | `cya configure --allow-command-output` | Allows command output to be included in AI prompts |
 | `cya configure --allow-diff-summarization` | Allows git diffs to be included in AI prompts |
 
-Integrations
+## Integrations
 
-Git hooks can sync commits after local git activity:
+Git hooks can auto-track newly created feature branches and sync commits after
+local git activity:
 
 ```sh
 cya hooks install
 cya hooks uninstall
 ```
 
-CYA manages `post-commit`, `post-merge`, and `post-checkout`. If an existing
-hook is present, CYA backs it up and chains it before running its own sync.
+CYA manages `post-commit`, `post-merge`, `post-checkout`, and
+`reference-transaction`. If an existing hook is present, CYA backs it up and
+chains it before running its own automation.
 
 Claude Code integration installs a local Stop hook:
 
@@ -203,29 +203,22 @@ Session summaries are explicit:
 cya session-note AUTH-123 "Refactored token refresh and added expiry coverage"
 ```
 
-Key design decisions
+## Key design decisions
 
-    Local-first storage: default app-data storage keeps sprint memory out of the
-    repo unless you explicitly choose `--storage repo`
+- Local-first storage keeps sprint memory out of the repo unless you explicitly
+  choose `--storage repo`.
+- Event sourcing keeps `events.jsonl` as the source of truth; rendered files can
+  be regenerated from it.
+- Branch-bound tickets let sync attach commits without guessing from commit
+  messages.
+- Baselines prevent old repo history from being attached to newly tracked work.
+- Unassigned commit safety preserves commits from unknown or ambiguous branches
+  until you run `cya assign <sha> <ticket>`.
+- Hook chaining preserves existing user hooks and runs them before CYA's
+  automation.
+- AI is optional presentation; structured local data is useful without AI.
 
-    Event sourcing: every meaningful action is appended to `events.jsonl`, and
-    rendered files can be regenerated from the log
-
-    Branch-bound tickets: `cya track` records the current branch so later syncs
-    can attach commits without guessing from commit messages
-
-    Unassigned commit safety: commits from unknown or ambiguous branches are
-    preserved as unassigned until you run `cya assign <sha> <ticket>`
-
-    Notes as typed evidence: blockers, follow-ups, decisions, discoveries,
-    risks, and context are captured separately so summaries can stay specific
-
-    Hook chaining: existing user hooks are preserved and run before CYA's sync
-
-    AI as optional presentation: structured local data is useful without AI;
-    Claude summaries only rewrite the output when you enable them
-
-Commands
+## Commands
 
 | Command | Responsibility |
 | --- | --- |
@@ -246,7 +239,7 @@ Commands
 | `cya agent status` | Show hook/sync/branch status |
 | `cya configure` | View or update configuration |
 
-Stack
+## Stack
 
 | Tool | Role |
 | --- | --- |
@@ -258,7 +251,7 @@ Stack
 | Git | Commit and branch source |
 | Claude Code | Optional local summarization and Stop hook integration |
 
-Development
+## Development
 
 ```sh
 npm install

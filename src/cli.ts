@@ -16,6 +16,7 @@ import { runDone } from './commands/done.js';
 import { runUnblock } from './commands/unblock.js';
 import { runStatus } from './commands/status.js';
 import { runConfigure } from './commands/configure.js';
+import { runHookPostCheckout, runHookReferenceTransaction } from './commands/hook.js';
 import { CyaError } from './errors.js';
 
 const program = new Command();
@@ -184,6 +185,47 @@ hooksCmd
     }
   });
 
+const internalHookCmd = program
+  .command('hook')
+  .description('Internal git hook entrypoints');
+
+internalHookCmd
+  .command('reference-transaction')
+  .argument('<state>', 'Git reference transaction state')
+  .argument('<gitProcessId>', 'Git process ID')
+  .action(async (state: string, gitProcessId: string) => {
+    try {
+      await runHookReferenceTransaction(state, gitProcessId, await readStdin());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+internalHookCmd
+  .command('post-checkout')
+  .argument('<oldHead>', 'Previous HEAD')
+  .argument('<newHead>', 'New HEAD')
+  .argument('<flag>', 'Checkout flag')
+  .argument('<gitProcessId>', 'Git process ID')
+  .option('--quiet', 'Suppress success output')
+  .action(
+    async (
+      oldHead: string,
+      newHead: string,
+      flag: string,
+      gitProcessId: string,
+      options: { quiet?: boolean },
+    ) => {
+      try {
+        await runHookPostCheckout(oldHead, newHead, flag, gitProcessId, process.cwd(), {
+          quiet: options.quiet,
+        });
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
 const agentCmd = program
   .command('agent')
   .description('Agent mode commands');
@@ -327,6 +369,14 @@ function handleError(err: unknown): never {
   }
   // Unexpected — rethrow so Node prints the stack.
   throw err;
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {

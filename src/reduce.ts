@@ -9,6 +9,7 @@ export function reduce(state: State, event: SprintEvent): State {
         id: event.ticket,
         title: event.payload.title,
         branch: event.branch,
+        baselineSha: event.payload.baselineSha ?? existing?.baselineSha,
         status: 'in_progress',
         commits: existing?.commits ?? [],
         evidence: existing?.evidence ?? [],

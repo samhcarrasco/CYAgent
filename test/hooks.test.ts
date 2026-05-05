@@ -33,7 +33,7 @@ describe('hooks install', () => {
 
   afterEach(() => cleanup(repoDir));
 
-  it('creates all three hook files', async () => {
+  it('creates all four hook files', async () => {
     await runHooksInstall(repoDir);
     for (const name of HOOK_NAMES) {
       expect(existsSync(hookPath(repoDir, name))).toBe(true);
@@ -46,6 +46,19 @@ describe('hooks install', () => {
       const content = readFileSync(hookPath(repoDir, name), 'utf8');
       expect(content).toContain(SENTINEL);
     }
+  });
+
+  it('post-checkout hook calls the internal checkout entrypoint', async () => {
+    await runHooksInstall(repoDir);
+    const content = readFileSync(hookPath(repoDir, 'post-checkout'), 'utf8');
+    expect(content).toContain('cya hook post-checkout "$1" "$2" "$3" "$GIT_PID" --quiet');
+  });
+
+  it('reference-transaction hook calls the internal entrypoint with replayed stdin', async () => {
+    await runHooksInstall(repoDir);
+    const content = readFileSync(hookPath(repoDir, 'reference-transaction'), 'utf8');
+    expect(content).toContain('"$PRE" "$@" < "$INPUT_FILE"');
+    expect(content).toContain('cya hook reference-transaction "$1" "$GIT_PID" < "$INPUT_FILE"');
   });
 
   it('hook files are executable on non-Windows', async () => {

@@ -44,6 +44,7 @@ export const TrackStartedEventSchema = EventBaseSchema.extend({
   ticket: z.string().min(1),
   payload: z.object({
     title: z.string().min(1),
+    baselineSha: z.string().min(1).optional(),
   }),
 });
 

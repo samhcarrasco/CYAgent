@@ -44,6 +44,7 @@ export const TicketStateSchema = z.object({
   id: z.string(),
   title: z.string(),
   branch: z.string().optional(),
+  baselineSha: z.string().optional(),
   status: TicketStatusSchema,
   commits: z.array(CommitEntrySchema),
   evidence: z.array(CommandEntrySchema),
