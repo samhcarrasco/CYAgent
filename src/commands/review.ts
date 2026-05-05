@@ -1,11 +1,18 @@
-﻿import { join } from 'node:path';
+import { join } from 'node:path';
 import { requireSprintDir } from '../paths.js';
 import { CyaError } from '../errors.js';
 import { readEvents } from '../events.js';
 import { atomicWrite } from '../io.js';
 import { reduceAll } from '../reduce.js';
 import { readConfig } from '../config.js';
+import type { Config } from '../config.js';
 import { summarizeReview } from '../ai.js';
+import {
+  buildTicketSummaries,
+  collectReviewEvidence,
+  DEFAULT_CAPS,
+} from '../review-evidence.js';
+import type { ReviewTicketSummary, ReviewImplementationEvidence } from '../review-evidence.js';
 
 export type ReviewOptions = {
   since?: string;
@@ -13,8 +20,10 @@ export type ReviewOptions = {
   noAi?: boolean;
 };
 
+const TEMPLATE_COMMIT_CAP = 5;
+
 export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()): Promise<void> {
-  const { sprintDir } = requireSprintDir(cwd);
+  const { repoRoot, sprintDir } = requireSprintDir(cwd);
 
   const untilDate = options.until ? new Date(options.until) : new Date();
   const sinceDate = options.since
@@ -60,17 +69,38 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
     .map((id) => state.tickets[id])
     .filter((t): t is NonNullable<typeof t> => !!t);
 
-  const completedTickets = activeTickets.filter((t) => doneIds.has(t.id));
-  const inProgressTickets = activeTickets.filter(
+  // ── Config (best-effort; failures skip evidence and AI) ───────────────────
+
+  let config: Config | null = null;
+  try {
+    config = readConfig(sprintDir);
+  } catch {
+    // proceed without config-dependent features
+  }
+
+  // ── Structured ticket summaries ────────────────────────────────────────────
+
+  const ticketSummaries: ReviewTicketSummary[] = buildTicketSummaries(
+    activeTickets,
+    inRange,
+    config?.privacy.allowCommandOutput ?? false,
+  );
+
+  const completedSummaries = ticketSummaries.filter((t) => doneIds.has(t.id));
+  const inProgressSummaries = ticketSummaries.filter(
     (t) => !doneIds.has(t.id) && t.status !== 'done',
   );
 
   const decisionsInRange = inRange.filter(
-    (e) => e.type === 'note_added' && (e as { payload: { kind: string } }).payload.kind === 'decision',
+    (e) =>
+      e.type === 'note_added' &&
+      (e as { payload: { kind: string } }).payload.kind === 'decision',
   );
 
   const blockersInRange = inRange.filter(
-    (e) => e.type === 'note_added' && (e as { payload: { kind: string } }).payload.kind === 'blocker',
+    (e) =>
+      e.type === 'note_added' &&
+      (e as { payload: { kind: string } }).payload.kind === 'blocker',
   );
 
   const unblockedIds = new Set(
@@ -78,11 +108,15 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   );
 
   const passedCount = inRange.filter(
-    (e) => e.type === 'command_recorded' && (e as { payload: { status: string } }).payload.status === 'passed',
+    (e) =>
+      e.type === 'command_recorded' &&
+      (e as { payload: { status: string } }).payload.status === 'passed',
   ).length;
 
   const failedCount = inRange.filter(
-    (e) => e.type === 'command_recorded' && (e as { payload: { status: string } }).payload.status === 'failed',
+    (e) =>
+      e.type === 'command_recorded' &&
+      (e as { payload: { status: string } }).payload.status === 'failed',
   ).length;
 
   const commitCount = inRange.filter(
@@ -90,6 +124,18 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   ).length;
 
   const sessionCount = inRange.filter((e) => e.type === 'session_summary').length;
+
+  // ── Git evidence (opt-in via privacy.allowDiffSummarization) ──────────────
+
+  let implementationEvidence: ReviewImplementationEvidence | undefined;
+  if (config?.privacy.allowDiffSummarization && ticketSummaries.length > 0) {
+    try {
+      const ev = collectReviewEvidence(repoRoot, ticketSummaries, DEFAULT_CAPS);
+      if (ev) implementationEvidence = ev;
+    } catch {
+      // evidence failures are non-fatal
+    }
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -101,20 +147,24 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   const lines: string[] = [`# Performance Review: ${sinceStr} to ${untilStr}`, ''];
 
   lines.push('## Completed');
-  if (completedTickets.length === 0) {
+  if (completedSummaries.length === 0) {
     lines.push('_none_');
   } else {
-    for (const t of completedTickets) lines.push(`- **${t.id}**: ${t.title}`);
+    for (const t of completedSummaries) {
+      lines.push(`- **${t.id}**: ${t.title}`);
+      for (const l of renderCommits(t.commits)) lines.push(l);
+    }
   }
   lines.push('');
 
   lines.push('## In Progress');
-  if (inProgressTickets.length === 0) {
+  if (inProgressSummaries.length === 0) {
     lines.push('_none_');
   } else {
-    for (const t of inProgressTickets) {
+    for (const t of inProgressSummaries) {
       const statusTag = t.status === 'blocked' ? ' _(blocked)_' : '';
       lines.push(`- **${t.id}**: ${t.title}${statusTag}`);
+      for (const l of renderCommits(t.commits)) lines.push(l);
     }
   }
   lines.push('');
@@ -150,8 +200,10 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   if (passedCount === 0 && failedCount === 0) {
     lines.push('_none_');
   } else {
-    if (passedCount > 0) lines.push(`- ${passedCount} test/build run${passedCount === 1 ? '' : 's'} passed`);
-    if (failedCount > 0) lines.push(`- ${failedCount} test/build run${failedCount === 1 ? '' : 's'} failed`);
+    if (passedCount > 0)
+      lines.push(`- ${passedCount} test/build run${passedCount === 1 ? '' : 's'} passed`);
+    if (failedCount > 0)
+      lines.push(`- ${failedCount} test/build run${failedCount === 1 ? '' : 's'} failed`);
   }
   lines.push('');
 
@@ -161,22 +213,27 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   if (sessionCount > 0) lines.push(`- ${sessionCount} session${sessionCount === 1 ? '' : 's'} logged`);
   lines.push('');
 
+  if (implementationEvidence) {
+    for (const l of renderImplementationEvidence(implementationEvidence)) lines.push(l);
+  }
+
   const output = lines.join('\n');
 
+  // ── AI narrative ───────────────────────────────────────────────────────────
+
   let finalOutput = output;
-  if (!options.noAi) {
+  if (!options.noAi && config?.ai.enabled) {
     try {
-      const config = readConfig(sprintDir);
-      if (config.ai.enabled) {
-        const result = await summarizeReview(config, {
-          since: sinceStr,
-          until: untilStr,
-          templateOutput: output,
-          privacy: config.privacy,
-        });
-        if (result.kind === 'summary') {
-          finalOutput = `${result.text}\n\n---\n\n${output}`;
-        }
+      const result = await summarizeReview(config, {
+        since: sinceStr,
+        until: untilStr,
+        templateOutput: output,
+        privacy: config.privacy,
+        tickets: ticketSummaries,
+        implementationEvidence,
+      });
+      if (result.kind === 'summary') {
+        finalOutput = `${result.text}\n\n---\n\n${output}`;
       }
     } catch {
       // fall through to template output
@@ -191,7 +248,54 @@ export async function runReview(options: ReviewOptions = {}, cwd = process.cwd()
   console.log(`Saved to ${outPath}`);
 }
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// ── Render helpers ─────────────────────────────────────────────────────────
+
+function renderCommits(commits: ReviewTicketSummary['commits']): string[] {
+  if (commits.length === 0) return [];
+  const shown = commits.slice(0, TEMPLATE_COMMIT_CAP);
+  const omitted = commits.length - shown.length;
+  const lines = shown.map((c) => `  - \`${c.shortSha}\` ${c.message}`);
+  if (omitted > 0) lines.push(`  - _${omitted} more commit${omitted === 1 ? '' : 's'}_`);
+  return lines;
+}
+
+function renderImplementationEvidence(ev: ReviewImplementationEvidence): string[] {
+  const lines: string[] = [];
+  lines.push('## Implementation Evidence');
+  lines.push('_Derived from git history. Enabled by `privacy.allowDiffSummarization`._');
+  lines.push('');
+  for (const ticket of ev.tickets) {
+    lines.push(`### ${ticket.ticketId}`);
+    for (const commit of ticket.commits) {
+      lines.push(`**${commit.shortSha}** ${commit.message}`);
+      if (commit.shortstat) lines.push(commit.shortstat);
+      for (const f of commit.files) {
+        const stats =
+          f.additions !== undefined && f.deletions !== undefined
+            ? ` (+${f.additions} −${f.deletions})`
+            : '';
+        lines.push(`- ${f.status} ${f.path}${stats}`);
+      }
+      const omissions: string[] = [];
+      if (commit.omitted.files) omissions.push(`${commit.omitted.files} more files`);
+      if (commit.omitted.skippedFiles)
+        omissions.push(`${commit.omitted.skippedFiles} lockfiles/generated skipped`);
+      if (omissions.length) lines.push(`_${omissions.join(', ')}_`);
+    }
+    const lastCommit = ticket.commits[ticket.commits.length - 1];
+    if (lastCommit?.omitted.commits) {
+      const n = lastCommit.omitted.commits;
+      lines.push(`_${n} more commit${n === 1 ? '' : 's'} not shown_`);
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
 
 function toSlug(d: Date): string {
   const mon = MONTHS[d.getUTCMonth()];

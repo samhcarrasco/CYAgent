@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -58,6 +58,15 @@ describe('readConfig', () => {
     }
     expect(caught).toBeInstanceOf(CyaError);
     expect((caught as CyaError).code).toBe('config-invalid');
+  });
+
+  it('older config missing allowDiffSummarization reads as false', () => {
+    const config = defaultConfig('my-sprint');
+    const { allowDiffSummarization: _removed, ...privacyWithout } = config.privacy;
+    const oldConfig = { ...config, privacy: privacyWithout };
+    writeFileSync(join(dir, 'config.json'), JSON.stringify(oldConfig), 'utf8');
+    const result = readConfig(dir);
+    expect(result.privacy.allowDiffSummarization).toBe(false);
   });
 });
 

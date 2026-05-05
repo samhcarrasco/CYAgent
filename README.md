@@ -1,24 +1,22 @@
-```text
-┌──────────────────────────────────────────────────────────────┐
-│ local-first sprint memory for software engineers             │
-└──────────────────────────────────────────────────────────────┘
-```
+# CYA
+
+Local-first sprint memory for software engineers.
 
 CYA is an append-only work memory for git-backed development. It tracks tickets,
-captures decisions, attaches commits, summarizes Claude Code sessions, and turns
-the whole thing into standup or performance review notes.
+captures decisions, attaches commits, records session notes, and turns the whole
+thing into standup or performance review notes.
 
-# Quick start
+## Quick start
 
 Requirements: Node.js 20+ and Git.
 
-Install the CLI from npm when using a published release:
+Install the CLI from npm:
 
 ```sh
 npm install -g cyagent
 ```
 
-If that package has not been published yet, install from this checkout:
+For local development from this checkout:
 
 ```sh
 cd path/to/cya
@@ -38,6 +36,23 @@ cya init
 cya hooks install
 ```
 
+Optional: enable Claude Code AI if you want `cya standup` and `cya review` to
+ask your local `claude` CLI to rewrite the template output. Install the Claude
+Code hook if you want CYA to run a quiet sync when a Claude Code session ends.
+Commit tracking works without either option.
+
+```sh
+cya configure --enable-ai
+cya claude install
+```
+
+Optional: allow `cya review` to read your local git diffs so the AI narrative
+can reference specific files and changes instead of just ticket names.
+
+```sh
+cya configure --enable-diff-summarization
+```
+
 Create a feature branch and start working:
 
 ```sh
@@ -45,7 +60,7 @@ git checkout -b AUTH-123-session-expiry
 ```
 
 CYA automatically starts tracking the new branch as ticket `AUTH-123` with title
-`session expiry`. Only commits made after tracking starts are attached — old repo
+`session expiry`. Only commits made after tracking starts are attached; old repo
 history is excluded.
 
 Add context as you go:
@@ -59,7 +74,7 @@ When you delete the branch, CYA automatically marks the ticket done:
 
 ```sh
 git branch -d AUTH-123-session-expiry
-# → AUTH-123 marked done (source: git-hook)
+# -> AUTH-123 marked done (source: git-hook)
 ```
 
 Or close it manually with a note:
@@ -76,6 +91,27 @@ cya standup --format slack
 cya review --since 2026-05-01 --until 2026-05-31
 ```
 
+## Reviews and dates
+
+Use `cya review` for the period you want to talk about. If you do not pass
+dates, CYA reviews the last 90 days.
+
+```sh
+cya review
+cya review --since 2026-05-01 --until 2026-05-31
+```
+
+Pick dates from your reporting window: the current sprint, the previous month,
+or the promotion/performance review period. The output is printed and also saved
+as `review-<range>.md` in CYA storage.
+
+CYA stores both an event timestamp and the Git commit timestamp. Review ranges
+currently use the CYA event timestamp, which is when the activity was recorded
+by CYA. With git hooks installed, commit events are recorded immediately after
+`git commit`, so that usually matches the commit date. If you run `cya sync`
+later, the commit still keeps its original Git `committedAt` value, but the
+review range uses the later sync event time.
+
 ## Auto-tracking branches
 
 CYA auto-tracks branches created and checked out in the same git operation
@@ -90,7 +126,7 @@ ignored.
 never auto-tracked.
 
 Manual tracking is available when the branch predates hooks, is protected, or
-the name doesn't match what you want:
+the name does not match what you want:
 
 ```sh
 cya track AUTH-123 "Fix session expiry"
@@ -115,6 +151,18 @@ Sprint data is stored in platform app-data outside the repo by default. Set
 `CYA_DATA_HOME` to override. Use `cya init --storage repo` for a repo-local
 `.sprint/` directory instead.
 
+On Windows, default storage is:
+
+```text
+%LOCALAPPDATA%\cya\repos\<repo-id>\
+```
+
+Find the repo ID in:
+
+```text
+%LOCALAPPDATA%\cya\repos\index.json
+```
+
 ## Integrations
 
 Install git hooks to enable auto-tracking, auto-close on deletion, and commit
@@ -127,15 +175,22 @@ cya hooks install
 CYA manages `post-commit`, `post-merge`, `post-checkout`, and
 `reference-transaction`, chaining any existing hooks before its own automation.
 
-Install a Claude Code Stop hook for automatic session summaries:
+Enable Claude Code AI for standup/review prose, and optionally install a local
+Claude Code Stop hook that runs a quiet sync after Claude sessions:
 
 ```sh
-cya claude install
 cya configure --enable-ai
+cya claude install
 ```
 
 The hook writes `.claude/settings.local.json` and stays local to your checkout.
-AI is optional — template output always works without it (`--no-ai`).
+AI is optional: template output always works without it (`--no-ai`).
+
+Session notes can be added manually:
+
+```sh
+cya session-note AUTH-123 "Finished the auth refresh flow and left follow-up tests."
+```
 
 ## Commands
 

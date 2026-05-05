@@ -211,4 +211,154 @@ describe('summarizeReview', () => {
     });
     expect(result.kind).toBe('skipped');
   });
+
+  it('includes structured commit messages in prompt when tickets provided', async () => {
+    mockExec.mockReturnValueOnce('narrative');
+    const config = makeConfig();
+    await summarizeReview(config, {
+      since: '2026-01-01',
+      until: '2026-01-31',
+      templateOutput: '# Review\n',
+      privacy: config.privacy,
+      tickets: [
+        {
+          id: 'AUTH-1',
+          title: 'Fix login bug',
+          status: 'done',
+          commits: [
+            {
+              sha: 'abc1234defabc1234def',
+              shortSha: 'abc1234',
+              message: 'Fix the login timeout',
+              committedAt: '2026-01-15T10:00:00.000Z',
+              observedAt: '2026-01-15T10:00:00.000Z',
+              branch: 'main',
+            },
+          ],
+          notes: {
+            blocker: [], followup: [], decision: [], discovery: [], risk: [], context: [],
+          },
+          commandEvidence: [],
+        },
+      ],
+    });
+    const prompt = (mockExec.mock.calls[0]![2] as { input: string }).input;
+    expect(prompt).toContain('AUTH-1');
+    expect(prompt).toContain('Fix the login timeout');
+    expect(prompt).toContain('abc1234');
+  });
+
+  it('includes implementation evidence in prompt when provided', async () => {
+    mockExec.mockReturnValueOnce('narrative');
+    const config = makeConfig();
+    await summarizeReview(config, {
+      since: '2026-01-01',
+      until: '2026-01-31',
+      templateOutput: '# Review\n',
+      privacy: config.privacy,
+      implementationEvidence: {
+        enabled: true,
+        caps: {
+          maxCommitsPerTicket: 10,
+          maxFilesPerCommit: 20,
+          maxExcerptFilesPerCommit: 3,
+          maxExcerptChars: 2000,
+          maxExcerptChangedLines: 100,
+          maxTotalEvidenceChars: 30000,
+          diffContextLines: 3,
+        },
+        tickets: [
+          {
+            ticketId: 'AUTH-1',
+            commits: [
+              {
+                sha: 'abc1234defabc1234defabc1234defabc1234def0',
+                shortSha: 'abc1234',
+                message: 'Fix login',
+                shortstat: '2 files changed',
+                files: [{ path: 'src/auth.ts', status: 'M', additions: 10, deletions: 2 }],
+                excerpts: [{ path: 'src/auth.ts', excerpt: '+const x = 1;\n', truncated: false }],
+                omitted: {},
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const prompt = (mockExec.mock.calls[0]![2] as { input: string }).input;
+    expect(prompt).toContain('Implementation evidence');
+    expect(prompt).toContain('src/auth.ts');
+    expect(prompt).toContain('2 files changed');
+  });
+
+  it('omits implementation evidence section when not provided', async () => {
+    mockExec.mockReturnValueOnce('narrative');
+    const config = makeConfig();
+    await summarizeReview(config, {
+      since: '2026-01-01',
+      until: '2026-01-31',
+      templateOutput: '# Review\n',
+      privacy: config.privacy,
+    });
+    const prompt = (mockExec.mock.calls[0]![2] as { input: string }).input;
+    expect(prompt).not.toContain('Implementation evidence');
+  });
+
+  it('includes anti-hallucination instructions in review prompt', async () => {
+    mockExec.mockReturnValueOnce('narrative');
+    const config = makeConfig();
+    await summarizeReview(config, {
+      since: '2026-01-01',
+      until: '2026-01-31',
+      templateOutput: '# Review\n',
+      privacy: config.privacy,
+    });
+    const prompt = (mockExec.mock.calls[0]![2] as { input: string }).input;
+    expect(prompt).toMatch(/does not invent|NOT invent/i);
+  });
+
+  it('does not surface raw secret literals from excerpts in prompt', async () => {
+    mockExec.mockReturnValueOnce('narrative');
+    const config = makeConfig();
+    // Evidence contains an already-redacted excerpt (redaction happens in collectReviewEvidence)
+    await summarizeReview(config, {
+      since: '2026-01-01',
+      until: '2026-01-31',
+      templateOutput: '# Review\n',
+      privacy: config.privacy,
+      implementationEvidence: {
+        enabled: true,
+        caps: {
+          maxCommitsPerTicket: 10,
+          maxFilesPerCommit: 20,
+          maxExcerptFilesPerCommit: 3,
+          maxExcerptChars: 2000,
+          maxExcerptChangedLines: 100,
+          maxTotalEvidenceChars: 30000,
+          diffContextLines: 3,
+        },
+        tickets: [
+          {
+            ticketId: 'T-1',
+            commits: [
+              {
+                sha: 'a'.repeat(40),
+                shortSha: 'aaaaaaa',
+                message: 'Config update',
+                files: [],
+                excerpts: [
+                  { path: 'config.ts', excerpt: '+const KEY = [REDACTED];\n', truncated: false },
+                ],
+                omitted: {},
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const prompt = (mockExec.mock.calls[0]![2] as { input: string }).input;
+    // The redacted form appears, not the original secret
+    expect(prompt).toContain('[REDACTED]');
+    expect(prompt).not.toContain('supersecret');
+  });
 });

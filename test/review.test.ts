@@ -1,5 +1,6 @@
 ﻿import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runTrack } from '../src/commands/track.js';
@@ -7,12 +8,15 @@ import { runNote } from '../src/commands/note.js';
 import { runDone } from '../src/commands/done.js';
 import { runUnblock } from '../src/commands/unblock.js';
 import { runReview } from '../src/commands/review.js';
+import { appendEvent, createEvent } from '../src/events.js';
+import { readConfig, writeConfig } from '../src/config.js';
 import { CyaError } from '../src/errors.js';
 import {
   setupTestAppData,
   makeTestRepo,
   makeTempGitRepo,
   cleanup,
+  resolveTestSprintDir,
 } from './helpers.js';
 
 let teardown: () => void;
@@ -253,5 +257,177 @@ describe('runReview — errors', () => {
     } finally {
       cleanup(notRepo);
     }
+  });
+});
+
+// ── commit messages ────────────────────────────────────────────────────────────
+
+describe('runReview — commit messages', () => {
+  let repoDir: string;
+  let sprintDir: string;
+
+  beforeEach(async () => {
+    ({ repoDir, sprintDir } = await setup());
+    await runTrack('AUTH-123', 'Fix session expiry', repoDir);
+  });
+  afterEach(() => cleanup(repoDir));
+
+  it('shows commit message under the ticket when a commit is recorded', async () => {
+    await appendEvent(
+      sprintDir,
+      createEvent({
+        type: 'commit_observed',
+        repoPath: repoDir,
+        branch: 'main',
+        source: 'user',
+        ticket: 'AUTH-123',
+        payload: {
+          sha: 'abc1234def5678901234abc1234def567890',
+          shortSha: 'abc1234',
+          message: 'Fix token refresh logic',
+          committedAt: new Date().toISOString(),
+          branch: 'main',
+        },
+      }),
+    );
+    const cap = captureConsole();
+    await runReview({ since: SINCE, until: TODAY, noAi: true }, repoDir);
+    cap.restore();
+    const out = cap.lines.join('\n');
+    expect(out).toContain('abc1234');
+    expect(out).toContain('Fix token refresh logic');
+  });
+
+  it('caps commit list at 5 and shows omitted count', async () => {
+    // Record 7 commits for the ticket
+    for (let i = 1; i <= 7; i++) {
+      await appendEvent(
+        sprintDir,
+        createEvent({
+          type: 'commit_observed',
+          repoPath: repoDir,
+          branch: 'main',
+          source: 'user',
+          ticket: 'AUTH-123',
+          payload: {
+            sha: `${'a'.repeat(36)}${String(i).padStart(4, '0')}`,
+            shortSha: `aaa000${i}`,
+            message: `Commit number ${i}`,
+            committedAt: new Date().toISOString(),
+            branch: 'main',
+          },
+        }),
+      );
+    }
+    const cap = captureConsole();
+    await runReview({ since: SINCE, until: TODAY, noAi: true }, repoDir);
+    cap.restore();
+    const out = cap.lines.join('\n');
+    // "2 more commits" or similar
+    expect(out).toMatch(/\d+ more commit/);
+  });
+
+  it('--no-ai still renders commit messages', async () => {
+    await appendEvent(
+      sprintDir,
+      createEvent({
+        type: 'commit_observed',
+        repoPath: repoDir,
+        branch: 'main',
+        source: 'user',
+        ticket: 'AUTH-123',
+        payload: {
+          sha: 'bbb1234def5678901234bbb1234def567890',
+          shortSha: 'bbb1234',
+          message: 'Refactor session store',
+          committedAt: new Date().toISOString(),
+          branch: 'main',
+        },
+      }),
+    );
+    const cap = captureConsole();
+    await runReview({ since: SINCE, until: TODAY, noAi: true }, repoDir);
+    cap.restore();
+    const out = cap.lines.join('\n');
+    expect(out).toContain('bbb1234');
+    expect(out).toContain('Refactor session store');
+  });
+});
+
+// ── diff evidence ──────────────────────────────────────────────────────────────
+
+describe('runReview — diff evidence', () => {
+  let repoDir: string;
+  let sprintDir: string;
+
+  beforeEach(async () => {
+    ({ repoDir, sprintDir } = await setup());
+    await runTrack('TEST-1', 'Test ticket', repoDir);
+  });
+  afterEach(() => cleanup(repoDir));
+
+  it('no Implementation Evidence section when allowDiffSummarization is false', async () => {
+    await appendEvent(
+      sprintDir,
+      createEvent({
+        type: 'commit_observed',
+        repoPath: repoDir,
+        branch: 'main',
+        source: 'user',
+        ticket: 'TEST-1',
+        payload: {
+          sha: 'ccc1234def5678901234ccc1234def567890',
+          shortSha: 'ccc1234',
+          message: 'Add feature',
+          committedAt: new Date().toISOString(),
+          branch: 'main',
+        },
+      }),
+    );
+    const cap = captureConsole();
+    await runReview({ since: SINCE, until: TODAY, noAi: true }, repoDir);
+    cap.restore();
+    expect(cap.lines.join('\n')).not.toContain('## Implementation Evidence');
+  });
+
+  it('shows Implementation Evidence section when allowDiffSummarization is true and commits exist', async () => {
+    // Create a real git commit so git evidence can be collected
+    writeFileSync(join(repoDir, 'index.ts'), 'export const x = 1;\n');
+    execSync('git add index.ts', { cwd: repoDir, stdio: 'pipe' });
+    execSync(
+      'git -c user.email=test@test.com -c user.name=Test commit -m "Add index.ts"',
+      { cwd: repoDir, stdio: 'pipe' },
+    );
+    const sha = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
+
+    await appendEvent(
+      sprintDir,
+      createEvent({
+        type: 'commit_observed',
+        repoPath: repoDir,
+        branch: 'main',
+        source: 'user',
+        ticket: 'TEST-1',
+        payload: {
+          sha,
+          shortSha: sha.slice(0, 7),
+          message: 'Add index.ts',
+          committedAt: new Date().toISOString(),
+          branch: 'main',
+        },
+      }),
+    );
+
+    // Enable diff summarization
+    const cfg = readConfig(sprintDir);
+    await writeConfig(sprintDir, {
+      ...cfg,
+      privacy: { ...cfg.privacy, allowDiffSummarization: true },
+    });
+
+    const cap = captureConsole();
+    await runReview({ since: SINCE, until: TODAY, noAi: true }, repoDir);
+    cap.restore();
+    expect(cap.lines.join('\n')).toContain('## Implementation Evidence');
   });
 });

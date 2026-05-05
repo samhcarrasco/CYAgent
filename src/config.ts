@@ -9,7 +9,7 @@ export const ConfigSchema = z.object({
   name: z.string(),
   createdAt: z.string(),
   privacy: z.object({
-    allowDiffSummarization: z.boolean(),
+    allowDiffSummarization: z.boolean().default(false),
     allowCommandOutput: z.boolean(),
   }),
   ai: z.object({
