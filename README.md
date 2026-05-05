@@ -7,6 +7,51 @@ decisions, attach commits, summarize Claude Code sessions,
 and turn the whole thing into standup or  preformance review notes
     This is my sprint memory. It catches the context that commits leave behind.
 
+# Quick start
+
+Install the CLI once, then initialize CYA inside the git repo you want to track:
+
+```sh
+npm install -g cyagent
+cd path/to/work-repo
+cya init
+```
+
+Start tracking the branch you are working on:
+
+```sh
+git checkout -b AUTH-123-session-expiry
+cya track AUTH-123 "Fix session expiry"
+```
+
+Capture useful context as you work:
+
+```sh
+cya note AUTH-123 "Refresh fails after Redis evicts the token" --type discovery
+cya note AUTH-123 "Waiting on staging credentials" --type blocker
+cya unblock AUTH-123 --note "Credentials arrived"
+```
+
+Sync commits and generate updates:
+
+```sh
+cya sync
+cya status
+cya standup --format markdown
+cya review --since 2026-05-01 --until 2026-05-31
+```
+
+Optional automation:
+
+```sh
+cya hooks install
+cya claude install
+cya configure --enable-ai
+```
+
+By default, CYA keeps sprint data in app-data storage outside the repo. Use
+`cya init --storage repo` if you want a repo-local `.sprint/` directory.
+
     Local-first by default — sprint data lives in app data unless you opt into
     repo-local `.sprint/` storage
 
@@ -240,53 +285,3 @@ npm pack --dry-run
 
 The published package includes `dist/` and this README. Run `npm run build`
 before testing the packaged CLI locally.
-
-Quick start
-
-Install the CLI once, then initialize CYA inside the git repo you want to track:
-
-```sh
-npm install -g cyagent
-cd path/to/work-repo
-cya init
-```
-Start tracking the branch you are working on:
-
-```sh
-git checkout -b (feature branch) AUTH-123-session-expiry
-cya track AUTH-123 "Fix session expiry" (cya track {ticketID#) "ticketTitle)
-```
-
-automation:
-
-```sh
-cya hooks install
-cya claude install
-cya configure --enable-ai
-```
-
-By default, CYA keeps sprint data in app-data storage outside the repo. Use
-`cya init --storage repo` if you want a repo-local `.sprint/` directory. The
-default `cya init` does not create repo files or edit `.gitignore`.
-
-
-Capture useful context as notes while you work:
-
-```sh
-cya note AUTH-123 "Refresh fails after Redis evicts the token" --type discovery
-cya note AUTH-123 "Waiting on staging credentials" --type blocker
-cya unblock AUTH-123 --note "Credentials arrived"
-```
-sync commits:
-
-```sh
-cya sync
-```
-
-Generate status, standup, and performance review notes:
-
-```sh
-cya status
-cya standup --format markdown
-cya review --since 2026-05-01 --until 2026-05-31 (for performance reviews)
-```
