@@ -118,6 +118,27 @@ export async function consumeBranchCreationMarker(
   return undefined;
 }
 
+export function branchDeletionsFromReferenceTransaction(
+  state: string,
+  stdin: string,
+): string[] {
+  if (state !== 'committed') return [];
+
+  const branches: string[] = [];
+  for (const line of stdin.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const [oldSha, newSha, ref] = trimmed.split(/\s+/);
+    if (!oldSha || !newSha || !ref) continue;
+    if (ZERO_SHA.test(oldSha)) continue;
+    if (!ZERO_SHA.test(newSha)) continue;
+    if (!ref.startsWith('refs/heads/')) continue;
+    branches.push(ref.slice('refs/heads/'.length));
+  }
+
+  return branches;
+}
+
 export function branchCreationMarkersFromReferenceTransaction(
   state: string,
   gitProcessId: string,

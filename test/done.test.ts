@@ -117,6 +117,52 @@ describe('runDone — state', () => {
   });
 });
 
+// ── source and quiet options ───────────────────────────────────────────────────
+
+describe('runDone — source and quiet', () => {
+  let repoDir: string;
+  let sprintDir: string;
+
+  beforeEach(async () => ({ repoDir, sprintDir } = await setup()));
+  afterEach(() => cleanup(repoDir));
+
+  it('writes source git-hook to the event when specified', async () => {
+    await runDone('AUTH-123', { source: 'git-hook' }, repoDir);
+    const events = readRawEvents(sprintDir);
+    expect(events.at(-1)).toMatchObject({ type: 'ticket_done', source: 'git-hook' });
+  });
+
+  it('defaults source to user when not specified', async () => {
+    await runDone('AUTH-123', {}, repoDir);
+    const events = readRawEvents(sprintDir);
+    expect(events.at(-1)).toMatchObject({ type: 'ticket_done', source: 'user' });
+  });
+
+  it('suppresses console output when quiet is true', async () => {
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(' '));
+    try {
+      await runDone('AUTH-123', { quiet: true }, repoDir);
+    } finally {
+      console.log = orig;
+    }
+    expect(logs).toHaveLength(0);
+  });
+
+  it('prints output when quiet is false', async () => {
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(' '));
+    try {
+      await runDone('AUTH-123', { quiet: false }, repoDir);
+    } finally {
+      console.log = orig;
+    }
+    expect(logs.some((l) => l.includes('AUTH-123'))).toBe(true);
+  });
+});
+
 // ── error handling ─────────────────────────────────────────────────────────────
 
 describe('runDone — errors', () => {

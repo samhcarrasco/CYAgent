@@ -5,10 +5,12 @@ import { runTrack } from './track.js';
 import { runSync } from './sync.js';
 import {
   branchCreationMarkersFromReferenceTransaction,
+  branchDeletionsFromReferenceTransaction,
   consumeBranchCreationMarker,
   deriveAutoTrackTicket,
   recordBranchCreationMarker,
 } from '../auto-track.js';
+import { runDone } from './done.js';
 
 export async function runHookReferenceTransaction(
   state: string,
@@ -22,6 +24,28 @@ export async function runHookReferenceTransaction(
   const markers = branchCreationMarkersFromReferenceTransaction(state, gitProcessId, stdin);
   for (const marker of markers) {
     await recordBranchCreationMarker(repoRoot, marker);
+  }
+
+  const deletedBranches = branchDeletionsFromReferenceTransaction(state, stdin);
+  if (deletedBranches.length > 0) {
+    try {
+      const { sprintDir } = requireSprintDir(repoRoot);
+      const events = await readEvents(sprintDir);
+      const sprintState = reduceAll(events);
+      for (const branch of deletedBranches) {
+        for (const ticketState of Object.values(sprintState.tickets)) {
+          if (ticketState.branch === branch && ticketState.status !== 'done') {
+            await runDone(
+              ticketState.id,
+              { source: 'git-hook', quiet: true, note: `Branch "${branch}" was deleted.` },
+              repoRoot,
+            );
+          }
+        }
+      }
+    } catch {
+      // Non-fatal: sprint may not be initialized or ticket lookup may fail.
+    }
   }
 }
 

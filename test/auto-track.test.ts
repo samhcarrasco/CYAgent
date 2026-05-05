@@ -6,12 +6,15 @@ import { execSync } from 'node:child_process';
 import { runInit } from '../src/commands/init.js';
 import { runTrack } from '../src/commands/track.js';
 import { runSync } from '../src/commands/sync.js';
+import { runDone } from '../src/commands/done.js';
 import {
   runHookPostCheckout,
   runHookReferenceTransaction,
 } from '../src/commands/hook.js';
+import { readEvents } from '../src/events.js';
 import {
   branchCreationMarkersFromReferenceTransaction,
+  branchDeletionsFromReferenceTransaction,
   deriveAutoTrackTicket,
 } from '../src/auto-track.js';
 import { type State, StateSchema, initialState, type TicketState } from '../src/state.js';
@@ -252,5 +255,139 @@ describe('hook-driven auto-tracking', () => {
       title: 'Protected branch work',
       branch: 'dev',
     });
+  });
+});
+
+describe('branch deletion parser', () => {
+  it('returns branch name for committed local branch deletion', () => {
+    const branches = branchDeletionsFromReferenceTransaction(
+      'committed',
+      `${'a'.repeat(40)} ${ZERO_SHA} refs/heads/AUTH-123-session-expiry\n`,
+    );
+    expect(branches).toEqual(['AUTH-123-session-expiry']);
+  });
+
+  it('returns nothing for non-committed state', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction(
+        'prepared',
+        `${'a'.repeat(40)} ${ZERO_SHA} refs/heads/AUTH-123-session-expiry\n`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns nothing for a branch creation (oldSha is zero)', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction(
+        'committed',
+        `${ZERO_SHA} ${'a'.repeat(40)} refs/heads/AUTH-123-session-expiry\n`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns nothing for a branch update (both SHAs nonzero)', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction(
+        'committed',
+        `${'b'.repeat(40)} ${'a'.repeat(40)} refs/heads/AUTH-123-session-expiry\n`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns nothing for tag refs', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction(
+        'committed',
+        `${'a'.repeat(40)} ${ZERO_SHA} refs/tags/v1.0.0\n`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns nothing for remote refs', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction(
+        'committed',
+        `${'a'.repeat(40)} ${ZERO_SHA} refs/remotes/origin/AUTH-123-session-expiry\n`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('returns nothing for malformed lines', () => {
+    expect(
+      branchDeletionsFromReferenceTransaction('committed', 'not-a-valid-line\n'),
+    ).toHaveLength(0);
+  });
+});
+
+describe('hook-driven branch deletion auto-close', () => {
+  let repoDir: string;
+  let sprintDir: string;
+  let baseSha: string;
+
+  beforeEach(async () => {
+    repoDir = makeTempGitRepo();
+    baseSha = makeCommit(repoDir, 'initial commit');
+    await runInit({}, repoDir);
+    sprintDir = resolveTestSprintDir(repoDir);
+  });
+
+  afterEach(() => cleanup(repoDir));
+
+  it('marks matching open ticket done when its branch is deleted', async () => {
+    checkout(repoDir, '-b AUTH-123-session-expiry');
+    await runTrack('AUTH-123', 'session expiry', repoDir, { quiet: true });
+
+    await runHookReferenceTransaction(
+      'committed',
+      'pid-del',
+      `${'a'.repeat(40)} ${ZERO_SHA} refs/heads/AUTH-123-session-expiry\n`,
+      repoDir,
+    );
+
+    const state = readState(sprintDir);
+    expect(state.tickets['AUTH-123']!.status).toBe('done');
+
+    const ctx = state.tickets['AUTH-123']!.notes.context;
+    expect(ctx.some((n) => n.text.includes('AUTH-123-session-expiry') && n.text.includes('deleted'))).toBe(true);
+
+    const events = await readEvents(sprintDir);
+    const last = events.at(-1)!;
+    expect(last.type).toBe('ticket_done');
+    expect(last.source).toBe('git-hook');
+  });
+
+  it('appends no ticket_done event when deleted branch is not tracked', async () => {
+    const eventsBefore = await readEvents(sprintDir);
+
+    await runHookReferenceTransaction(
+      'committed',
+      'pid-del',
+      `${'a'.repeat(40)} ${ZERO_SHA} refs/heads/untracked-branch\n`,
+      repoDir,
+    );
+
+    const eventsAfter = await readEvents(sprintDir);
+    expect(eventsAfter.filter((e) => e.type === 'ticket_done')).toHaveLength(0);
+    expect(eventsAfter).toHaveLength(eventsBefore.length);
+  });
+
+  it('appends no duplicate ticket_done when ticket is already done', async () => {
+    checkout(repoDir, '-b AUTH-123-session-expiry');
+    await runTrack('AUTH-123', 'session expiry', repoDir, { quiet: true });
+    await runDone('AUTH-123', { quiet: true }, repoDir);
+
+    const eventsBefore = await readEvents(sprintDir);
+    const doneCountBefore = eventsBefore.filter((e) => e.type === 'ticket_done').length;
+
+    await runHookReferenceTransaction(
+      'committed',
+      'pid-del',
+      `${'a'.repeat(40)} ${ZERO_SHA} refs/heads/AUTH-123-session-expiry\n`,
+      repoDir,
+    );
+
+    const eventsAfter = await readEvents(sprintDir);
+    const doneCountAfter = eventsAfter.filter((e) => e.type === 'ticket_done').length;
+    expect(doneCountAfter).toBe(doneCountBefore);
   });
 });

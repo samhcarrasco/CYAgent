@@ -9,7 +9,7 @@ import { renderTicket, renderSprint } from '../render.js';
 
 export async function runDone(
   ticket: string,
-  options: { note?: string } = {},
+  options: { note?: string; source?: 'user' | 'git-hook'; quiet?: boolean } = {},
   cwd = process.cwd(),
 ): Promise<void> {
   if (!ticket || /\s/.test(ticket)) {
@@ -30,7 +30,7 @@ export async function runDone(
   const event = createEvent({
     type: 'ticket_done',
     repoPath: repoRoot,
-    source: 'user',
+    source: options.source ?? 'user',
     ticket,
     payload: { note: options.note },
   });
@@ -47,5 +47,7 @@ export async function runDone(
   await atomicWrite(join(ticketsDir, `${ticket}.md`), renderTicket(state.tickets[ticket]!));
   await atomicWrite(join(sprintDir, 'SPRINT.md'), renderSprint(state));
 
-  console.log(`${ticket} marked done`);
+  if (!options.quiet) {
+    console.log(`${ticket} marked done`);
+  }
 }
