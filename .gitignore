@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.sprint/state.json
+.sprint/SPRINT.md
+.env
+*.log
