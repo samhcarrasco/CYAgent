@@ -24,24 +24,9 @@ git checkout -b AUTH-123-session-expiry
 cya track AUTH-123 "Fix session expiry"
 ```
 
-Capture useful context as you work:
-
-```sh
-cya note AUTH-123 "Refresh fails after Redis evicts the token" --type discovery
-cya note AUTH-123 "Waiting on staging credentials" --type blocker
-cya unblock AUTH-123 --note "Credentials arrived"
-```
-
-Sync commits and generate updates:
-
-```sh
-cya sync
-cya status
-cya standup --format markdown
-cya review --since 2026-05-01 --until 2026-05-31
-```
-
-Optional automation:
+Turn on the automation. This is the main benefit of this agent: git hooks and
+Claude Code hooks keep the sprint memory updated while you work, instead of
+making you manually reconstruct context later.
 
 ```sh
 cya hooks install
