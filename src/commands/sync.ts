@@ -6,6 +6,7 @@ import { atomicWrite } from '../io.js';
 import { reduceAll } from '../reduce.js';
 import { renderTicket, renderSprint } from '../render.js';
 import { getGitLog } from '../git.js';
+import { isProtectedBranch } from '../auto-track.js';
 
 export interface SyncOptions {
   source?: 'user' | 'git-hook' | 'watcher' | 'claude-code';
@@ -41,6 +42,14 @@ export async function runSync(cwd = process.cwd(), opts: SyncOptions = {}): Prom
     targetTicketId = matching[0].id;
     targetBaselineSha = matching[0].baselineSha;
   } else if (matching.length === 0) {
+    if (source === 'git-hook' && isProtectedBranch(branch)) {
+      if (!quiet) {
+        console.log(
+          `sync: branch "${branch}" is protected and not associated with any tracked ticket. Skipping automatic sync.`,
+        );
+      }
+      return;
+    }
     console.log(
       `sync: branch "${branch}" not associated with any tracked ticket. Commits unassigned.`,
     );

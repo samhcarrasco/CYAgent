@@ -267,6 +267,14 @@ describe('branch deletion parser', () => {
     expect(branches).toEqual(['AUTH-123-session-expiry']);
   });
 
+  it('returns branch name for Git for Windows zero-old deletion records', () => {
+    const branches = branchDeletionsFromReferenceTransaction(
+      'committed',
+      `${ZERO_SHA} ${ZERO_SHA} refs/heads/AUTH-123-session-expiry\n`,
+    );
+    expect(branches).toEqual(['AUTH-123-session-expiry']);
+  });
+
   it('returns nothing for non-committed state', () => {
     expect(
       branchDeletionsFromReferenceTransaction(

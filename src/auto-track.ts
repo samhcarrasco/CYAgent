@@ -130,7 +130,6 @@ export function branchDeletionsFromReferenceTransaction(
     if (!trimmed) continue;
     const [oldSha, newSha, ref] = trimmed.split(/\s+/);
     if (!oldSha || !newSha || !ref) continue;
-    if (ZERO_SHA.test(oldSha)) continue;
     if (!ZERO_SHA.test(newSha)) continue;
     if (!ref.startsWith('refs/heads/')) continue;
     branches.push(ref.slice('refs/heads/'.length));

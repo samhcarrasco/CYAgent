@@ -409,6 +409,22 @@ describe('runSync — unassigned commits in state', () => {
     cleanup(repoDir);
     expect(state.unassignedCommits.length).toBeGreaterThan(0);
   });
+
+  it('skips protected unmatched branches for automatic hook sync', async () => {
+    const repoDir = makeTempGitRepo();
+    makeCommit(repoDir, 'initial');
+    await runInit({}, repoDir);
+    makeCommit(repoDir, 'mainline work');
+
+    await runSync(repoDir, { source: 'git-hook', quiet: true });
+
+    const sprintDir = resolveTestSprintDir(repoDir);
+    const state = readState(sprintDir);
+    const events = readEvents(sprintDir);
+    cleanup(repoDir);
+    expect(state.unassignedCommits).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'commit_observed')).toHaveLength(0);
+  });
 });
 
 // ── stubs ─────────────────────────────────────────────────────────────────────

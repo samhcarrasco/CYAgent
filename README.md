@@ -10,8 +10,29 @@ the whole thing into standup or performance review notes.
 
 # Quick start
 
+Requirements: Node.js 20+ and Git.
+
+Install the CLI from npm when using a published release:
+
 ```sh
 npm install -g cyagent
+```
+
+If that package has not been published yet, install from this checkout:
+
+```sh
+cd path/to/cya
+npm install
+npm run build
+npm link
+```
+
+`cyagent` is the package name. Both install paths put the `cya` command on your
+PATH.
+
+Initialize CYA in the git repo you want to track:
+
+```sh
 cd path/to/work-repo
 cya init
 cya hooks install
